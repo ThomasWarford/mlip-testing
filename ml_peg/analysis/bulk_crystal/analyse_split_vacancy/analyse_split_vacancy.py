@@ -28,14 +28,12 @@ DEFAULT_THRESHOLDS, DEFAULT_TOOLTIPS, DEFAULT_WEIGHTS = load_metrics_config(
     METRICS_CONFIG_PATH
 )
 
-# same setting as MatBench
-# https://github.com/janosh/matbench-discovery/blob/93cc6907ac08b4adaa8391ccc4adf9c015c0dd61/matbench_discovery/structure/symmetry.py#L124
-STRUCTURE_MATCHER = StructureMatcher(stol=1.0, scale=False)
+STRUCTURE_MATCHER = StructureMatcher()
 
 
-def get_rmsd(atoms_1, atoms_2) -> float:
+def is_same_atoms(atoms_1, atoms_2) -> float:
     """
-    Calculate the RMSD between two ASE Atoms objects.
+    Determine if two ASE Atoms are the same.
 
     Parameters
     ----------
@@ -44,14 +42,12 @@ def get_rmsd(atoms_1, atoms_2) -> float:
 
     Returns
     -------
-    float
-        Root mean square displacement.
+    bool
+        True if same structure.
     """
-    rmsd, max_dist = STRUCTURE_MATCHER.get_rms_dist(
+    return STRUCTURE_MATCHER.fit(
         Structure.from_ase_atoms(atoms_1), Structure.from_ase_atoms(atoms_2)
     )
-
-    return rmsd
 
 
 def get_hoverdata() -> tuple[list, list, list]:
@@ -110,9 +106,9 @@ def build_results() -> tuple[dict[str, list], dict[str, list], dict[str, list]]:
     result_spearmans_coefficient = {
         mlip: [] for mlip in MODELS
     }  # spearmans coefficient for every material-cation pair
-    result_rmsd = {
+    result_same_structure = {
         mlip: [] for mlip in MODELS
-    }  # RMSD error for every material-cation pair
+    }  # DFT-MLIP structure match for every material-cation pair
     # TODO: investigate Kendall rank correlation
     result_rmsd = {mlip: [] for mlip in MODELS}
 
@@ -180,23 +176,23 @@ def build_results() -> tuple[dict[str, list], dict[str, list], dict[str, list]]:
                     ref_sv_energies + ref_nv_energies,
                 ).statistic
 
-                rmsd_list = []
+                same_structure_list = []
                 for ref_atoms, mlip_atoms in zip(
                     ref_nv_atoms_list, nv_atoms_list, strict=False
                 ):
-                    rmsd_list.append(get_rmsd(ref_atoms, mlip_atoms))
+                    same_structure_list.append(is_same_atoms(ref_atoms, mlip_atoms))
                 for ref_atoms, mlip_atoms in zip(
                     ref_sv_atoms_list, sv_atoms_list, strict=False
                 ):
-                    rmsd_list.append(get_rmsd(ref_atoms, mlip_atoms))
+                    same_structure_list.append(is_same_atoms(ref_atoms, mlip_atoms))
 
                 # add metrics to dicts
                 result_formation_energy[model_name].append(sv_formation_energy)
                 result_spearmans_coefficient[model_name].append(spearmans_coefficient)
-                result_rmsd[model_name].extend(rmsd_list)
+                result_same_structure[model_name].extend(same_structure_list)
 
         ref_stored = False
-    return result_formation_energy, result_spearmans_coefficient, result_rmsd
+    return result_formation_energy, result_spearmans_coefficient, result_same_structure
 
 
 @pytest.fixture
@@ -276,7 +272,7 @@ def spearmans_coefficient_dft_mean(build_results) -> dict[str, float]:
 
 
 @pytest.fixture
-def rmsd_dft_mean(build_results) -> dict[str, float]:
+def same_structure_accuracy(build_results) -> dict[str, float]:
     """
     Get RMSD between DFT and MLIP relaxed structures.
 
@@ -290,11 +286,11 @@ def rmsd_dft_mean(build_results) -> dict[str, float]:
     dict[str, float]
         Dictionary of mean relaxed structure RMSDs for all models.
     """
-    _, _, result_rmsd = build_results
+    _, _, result_same_structure = build_results
 
     results = {}
     for model_name in MODELS:
-        results[model_name] = float(np.mean(result_rmsd[model_name]))
+        results[model_name] = float(np.mean(result_same_structure[model_name]))
     return results
 
 
@@ -330,7 +326,7 @@ def metrics(
     return {
         "MAE": formation_energy_dft_mae,
         "Mean Spearman's Coefficient": spearmans_coefficient_dft_mean,
-        "RMSD": rmsd_dft_mean,
+        "Structure Accuracy": rmsd_dft_mean,
     }
 
 
