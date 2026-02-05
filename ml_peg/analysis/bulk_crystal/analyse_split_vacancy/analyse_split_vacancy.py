@@ -53,6 +53,29 @@ def get_rmsd(atoms_1, atoms_2) -> float:
 
     return rmsd
 
+def get_relaxed_energies(ref_atoms_list, atoms_list) -> list[float]:
+    """
+    Get MLIP energies from structures matching reference.
+
+    Parameters
+    ----------
+    ref_atoms_list, atoms_list
+        DFT relaxed and MLIP relaxed atoms.
+
+    Returns
+    -------
+    list[float]
+        Energies of structures that match.
+    """
+    energies = []
+    for ref_atoms, atoms in zip(ref_atoms_list, atoms_list):
+        if STRUCTURE_MATCHER.fit(
+            Structure.from_ase_atoms(ref_atoms),
+            Structure.from_ase_atoms(atoms),
+        ):
+            energies.append(atoms.info['relaxed_energy'])
+
+    return energies
 
 def get_hoverdata() -> tuple[list, list, list]:
     """
@@ -171,14 +194,16 @@ def build_results() -> tuple[dict[str, list], dict[str, list], dict[str, list]]:
                 sv_energies = [float(at.info["relaxed_energy"]) for at in sv_atoms_list]
 
                 # calculate metrics
-                sv_formation_energy = min(sv_energies) - min(nv_energies)
-                # sv_preferred = sv_formation_energy < preference_energy_threshold
-
                 spearmans_coefficient = spearmanr(
                     [float(at.info["initial_energy"]) for at in nv_atoms_list]
                     + [float(at.info["initial_energy"]) for at in sv_atoms_list],
                     ref_sv_energies + ref_nv_energies,
                 ).statistic
+
+                sv_formation_energy = min(get_relaxed_energies(nv_atoms_list)) - min(
+                    get_relaxed_energies(sv_atoms_list)
+                )
+                # sv_preferred = sv_formation_energy < preference_energy_threshold
 
                 rmsd_list = []
                 for ref_atoms, mlip_atoms in zip(
