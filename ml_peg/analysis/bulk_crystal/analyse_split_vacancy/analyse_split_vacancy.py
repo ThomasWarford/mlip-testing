@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ProcessPoolExecutor
+import os
 from pathlib import Path
 
 from ase.io import read
@@ -72,7 +74,7 @@ def get_hoverdata(functional_path) -> tuple[list, list, list]:
     vacant_cations = []
 
     model_dir = model_dir = functional_path / MODELS[0]
-    for material_dir in tqdm(list(model_dir.iterdir())):
+    for material_dir in model_dir.iterdir():
         split_dir_name = material_dir.stem.split("-")
         bulk_formula = split_dir_name[0]
         mp_id = f"mp-{split_dir_name[-1]}"
@@ -124,87 +126,88 @@ def build_results(
     # TODO: investigate Kendall rank correlation
     result_rmsd = {mlip: [] for mlip in MODELS}
 
-    ref_stored = False
     for model_name in tqdm(MODELS):
         model_dir = functional_path / model_name
 
         if not model_dir.exists():
             continue
 
-        for material_dir in tqdm(list(model_dir.iterdir()), leave=False):
+        tasks = []
+        for material_dir in list(model_dir.iterdir()):
             cation_dirs = [
                 p for p in material_dir.iterdir() if p.is_dir()
             ]  # skip pristine supercell.xyz files if present (not used)
+            for cation_dir in cation_dirs:
+                tasks.append((functional_path, material_dir, cation_dir))
 
-            for cation_dir in tqdm(cation_dirs, leave=False):
-                # cation = cation_dir.stem TODO: save structures for visualization
+        if not tasks:
+            continue
 
-                nv_xyz_path = cation_dir / "normal_vacancy.xyz.gz"
-                sv_xyz_path = cation_dir / "split_vacancy.xyz.gz"
-
-                if not (nv_xyz_path.exists() and sv_xyz_path.exists()):
-                    raise ValueError  # TODO: remove
-
-                nv_atoms_list = read(nv_xyz_path, ":")
-                sv_atoms_list = read(sv_xyz_path, ":")
-
-                if not ref_stored:
-                    ref_nv_energies = [
-                        float(at.info["ref_energy"]) for at in nv_atoms_list
-                    ]
-                    ref_sv_energies = [
-                        float(at.info["ref_energy"]) for at in sv_atoms_list
-                    ]
-
-                    ref_sv_formation_energy = min(ref_sv_energies) - min(
-                        ref_nv_energies
-                    )
-                    # ref_sv_preferred = (
-                    #     ref_sv_formation_energy < preference_energy_threshold
-                    # ) # TODO: F1 score
-
-                    result_formation_energy["ref"].append(ref_sv_formation_energy)
-
-                    ref_cation_dir = (
-                        functional_path / "ref" / material_dir.stem / cation_dir.stem
-                    )
-                    ref_nv_atoms_list = read(
-                        ref_cation_dir / "normal_vacancy.xyz.gz", ":"
-                    )
-                    ref_sv_atoms_list = read(
-                        ref_cation_dir / "split_vacancy.xyz.gz", ":"
-                    )
-
-                nv_energies = [float(at.info["relaxed_energy"]) for at in nv_atoms_list]
-                sv_energies = [float(at.info["relaxed_energy"]) for at in sv_atoms_list]
-
-                # calculate metrics
-                sv_formation_energy = min(sv_energies) - min(nv_energies)
-                # sv_preferred = sv_formation_energy < preference_energy_threshold
-
-                spearmans_coefficient = spearmanr(
-                    [float(at.info["initial_energy"]) for at in nv_atoms_list]
-                    + [float(at.info["initial_energy"]) for at in sv_atoms_list],
-                    ref_sv_energies + ref_nv_energies,
-                ).statistic
-
-                rmsd_list = []
-                for ref_atoms, mlip_atoms in zip(
-                    ref_nv_atoms_list, nv_atoms_list, strict=False
-                ):
-                    rmsd_list.append(get_rmsd(ref_atoms, mlip_atoms))
-                for ref_atoms, mlip_atoms in zip(
-                    ref_sv_atoms_list, sv_atoms_list, strict=False
-                ):
-                    rmsd_list.append(get_rmsd(ref_atoms, mlip_atoms))
-
-                # add metrics to dicts
+        max_workers = min(len(tasks), os.cpu_count() or 1)
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            for (
+                ref_sv_formation_energy,
+                sv_formation_energy,
+                spearmans_coefficient,
+                rmsd_list,
+            ) in tqdm(
+                executor.map(_process_pair, tasks),
+                total=len(tasks),
+                leave=False,
+            ):
+                result_formation_energy["ref"].append(ref_sv_formation_energy)
                 result_formation_energy[model_name].append(sv_formation_energy)
                 result_spearmans_coefficient[model_name].append(spearmans_coefficient)
                 result_rmsd[model_name].extend(rmsd_list)
-
-        ref_stored = False
     return result_formation_energy, result_spearmans_coefficient, result_rmsd
+
+
+def _process_pair(
+    task: tuple[Path, Path, Path],
+) -> tuple[float, float, float, list[float]]:
+    functional_path, material_dir, cation_dir = task
+
+    nv_xyz_path = cation_dir / "normal_vacancy.xyz.gz"
+    sv_xyz_path = cation_dir / "split_vacancy.xyz.gz"
+
+    if not (nv_xyz_path.exists() and sv_xyz_path.exists()):
+        raise ValueError  # TODO: remove
+
+    nv_atoms_list = read(nv_xyz_path, ":")
+    sv_atoms_list = read(sv_xyz_path, ":")
+
+    ref_nv_energies = [float(at.info["ref_energy"]) for at in nv_atoms_list]
+    ref_sv_energies = [float(at.info["ref_energy"]) for at in sv_atoms_list]
+
+    ref_sv_formation_energy = min(ref_sv_energies) - min(ref_nv_energies)
+
+    ref_cation_dir = functional_path / "ref" / material_dir.stem / cation_dir.stem
+    ref_nv_atoms_list = read(ref_cation_dir / "normal_vacancy.xyz.gz", ":")
+    ref_sv_atoms_list = read(ref_cation_dir / "split_vacancy.xyz.gz", ":")
+
+    nv_energies = [float(at.info["relaxed_energy"]) for at in nv_atoms_list]
+    sv_energies = [float(at.info["relaxed_energy"]) for at in sv_atoms_list]
+
+    sv_formation_energy = min(sv_energies) - min(nv_energies)
+
+    spearmans_coefficient = spearmanr(
+        [float(at.info["initial_energy"]) for at in nv_atoms_list]
+        + [float(at.info["initial_energy"]) for at in sv_atoms_list],
+        ref_sv_energies + ref_nv_energies,
+    ).statistic
+
+    rmsd_list = []
+    for ref_atoms, mlip_atoms in zip(ref_nv_atoms_list, nv_atoms_list, strict=False):
+        rmsd_list.append(get_rmsd(ref_atoms, mlip_atoms))
+    for ref_atoms, mlip_atoms in zip(ref_sv_atoms_list, sv_atoms_list, strict=False):
+        rmsd_list.append(get_rmsd(ref_atoms, mlip_atoms))
+
+    return (
+        ref_sv_formation_energy,
+        sv_formation_energy,
+        spearmans_coefficient,
+        rmsd_list,
+    )
 
 
 @pytest.fixture  # cache outputs
