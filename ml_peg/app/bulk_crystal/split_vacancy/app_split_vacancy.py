@@ -7,8 +7,9 @@ from dash.html import Div
 
 from ml_peg.app import APP_ROOT
 from ml_peg.app.base_app import BaseApp
-from ml_peg.app.utils.build_callbacks import plot_from_table_column
+from ml_peg.app.utils.build_callbacks import plot_from_table_column, struct_pair_from_violin
 from ml_peg.app.utils.load import read_plot
+from ml_peg.calcs import CALCS_ROOT
 from ml_peg.models.get_models import get_model_names
 from ml_peg.models.models import current_models
 
@@ -18,6 +19,7 @@ BENCHMARK_NAME = "Split vacancy"
 # TODO: change DOCS_URL
 DOCS_URL = "https://ddmms.github.io/ml-peg/user_guide/benchmarks/bulk_crystal.html#lattice-constants"
 DATA_PATH = APP_ROOT / "data" / "bulk_crystal" / "split_vacancy"
+STRUCTS_PATH = CALCS_ROOT / "bulk_crystal" / "split_vacancy" / "outputs"
 
 
 class SplitVacancyApp(BaseApp):
@@ -36,11 +38,11 @@ class SplitVacancyApp(BaseApp):
 
         max_dist_violin_pbesol = read_plot(
             DATA_PATH / "figure_max_dist_pbesol.json",
-            id=f"{BENCHMARK_NAME}-figure",
+            id=f"{BENCHMARK_NAME}-violin-figure",
         )
         max_dist_violin_pbe = read_plot(
             DATA_PATH / "figure_max_dist_pbe.json",
-            id=f"{BENCHMARK_NAME}-figure",
+            id=f"{BENCHMARK_NAME}-violin-figure",
         )
 
         plot_from_table_column(
@@ -56,6 +58,17 @@ class SplitVacancyApp(BaseApp):
             },
         )
 
+        struct_pair_from_violin(
+            violin_id=f"{BENCHMARK_NAME}-violin-figure",
+            struct_id=f"{BENCHMARK_NAME}-struct-placeholder",
+            calc_functional_path= STRUCTS_PATH / "PBEsol",
+        )
+
+        # struct_pair_from_violin(
+        #     violin_id=f"{BENCHMARK_NAME}-figure-placeholder",
+        #     struct_id=f"{BENCHMARK_NAME}-struct-placeholder",
+        #     calc_functional_path=DATA_PATH / "PBE",
+        # )
 
 def get_app() -> SplitVacancyApp:
     """

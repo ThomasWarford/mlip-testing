@@ -17,6 +17,7 @@ from dash.exceptions import PreventUpdate
 from dash.html import Div, Iframe
 import matplotlib.pyplot as plt
 import plotly.graph_objects as go
+from ml_peg.models.get_models import get_model_names
 
 from ml_peg.analysis.utils.decorators import (
     PERIODIC_TABLE_COLS,
@@ -24,6 +25,8 @@ from ml_peg.analysis.utils.decorators import (
     PERIODIC_TABLE_ROWS,
 )
 from ml_peg.app.utils.weas import generate_weas_html
+
+MODELS = get_model_names()
 
 
 def plot_from_table_column(
@@ -260,7 +263,7 @@ def struct_from_table(
                             "borderRadius": "5px",
                         },
                     )
-                ), None
+                )
 
             raise PreventUpdate
         raise ValueError("Invalid column_id")
@@ -713,6 +716,110 @@ def scatter_and_assets_from_table(
         content, metadata = result
 
         return content, metadata, active_cell, None
+
+
+def struct_pair_from_violin(
+    violin_id: str,
+    struct_id: str,
+    calc_functional_path: Path,
+) -> None:
+    """
+    Attach callback to show DFT and MLIP structures side-by-side when a violin point is clicked.
+
+    Structure data is read directly from the calculation output files at callback
+    time and embedded inline — no asset files need to be written.
+
+    Expects customdata on each violin point to be:
+    [model_name, mp_id, formula, vacant_cation, vacancy_type, frame_id]
+
+    Parameters
+    ----------
+    violin_id
+        ID for the Dash violin Graph being clicked.
+    struct_id
+        ID for the Dash placeholder Div where structures will be displayed.
+    calc_functional_path
+        Path to the functional-specific calculation outputs directory
+        (e.g. CALC_PATH / "pbesol").
+    """
+    from ase.io import read as ase_read
+
+    @callback(
+        Output(struct_id, "children", allow_duplicate=True),
+        Input(violin_id, "clickData"),
+        prevent_initial_call="initial_duplicate",
+    )
+    def show_struct_pair(click_data):
+        """
+        Show DFT and MLIP relaxed structures side-by-side on violin point click.
+
+        Parameters
+        ----------
+        click_data
+            Clicked data point in violin plot.
+
+        Returns
+        -------
+        Div
+            Two WEAS structure viewers in a side-by-side flex layout.
+        """
+        point = click_data["points"][0]
+        customdata = point["customdata"]
+
+        print(point.keys())
+        print(point["customdata"])
+        print(point['curveNumber'])
+        model_name = MODELS[point["curveNumber"]]  # e.g. mace-mp-0b3
+        mp_id = customdata[0]
+        formula = customdata[1]
+        cation = customdata[2]
+        vac_type = customdata[3]
+        frame_id = int(customdata[4])
+
+        mat_stem = f"{formula}-{mp_id}"  # e.g. "Al2O3-mp-1143"
+        vacancy_stem = "normal_vacancy" if vac_type == "NV" else "split_vacancy"
+
+        mlip_path = (
+            calc_functional_path / model_name / mat_stem / cation / f"{vacancy_stem}.xyz"
+        )
+        dft_path = (
+            calc_functional_path / "ref" / mat_stem / cation / f"{vacancy_stem}.xyz"
+        )
+        print(dft_path)
+
+        iframe_style = {
+            "height": "550px",
+            "width": "100%",
+            "border": "1px solid #ddd",
+            "borderRadius": "5px",
+        }
+        label_style = {
+            "textAlign": "center",
+            "fontWeight": "bold",
+            "marginBottom": "4px",
+        }
+
+        def make_viewer(path: Path, label: str) -> Div:
+            if not path.exists():
+                return Div(f"{label}: file not found.")
+            return Div(
+                [
+                    Div(label, style=label_style),
+                    Iframe(
+                        srcDoc=generate_weas_html(path, index=frame_id),
+                        style=iframe_style,
+                    ),
+                ],
+                style={"flex": "1", "minWidth": "0"},
+            )
+
+        return Div(
+            [
+                make_viewer(dft_path, "DFT (reference)"),
+                make_viewer(mlip_path, f"MLIP ({model_name})"),
+            ],
+            style={"display": "flex", "gap": "12px"},
+        )
 
 
 def model_asset_from_scatter(
