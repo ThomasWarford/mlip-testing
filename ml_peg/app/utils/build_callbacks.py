@@ -17,7 +17,6 @@ from dash.exceptions import PreventUpdate
 from dash.html import Div, Iframe
 import matplotlib.pyplot as plt
 import plotly.graph_objects as go
-from ml_peg.models.get_models import get_model_names
 
 from ml_peg.analysis.utils.decorators import (
     PERIODIC_TABLE_COLS,
@@ -25,6 +24,7 @@ from ml_peg.analysis.utils.decorators import (
     PERIODIC_TABLE_ROWS,
 )
 from ml_peg.app.utils.weas import generate_weas_html
+from ml_peg.models.get_models import get_model_names
 
 MODELS = get_model_names()
 
@@ -742,7 +742,6 @@ def struct_pair_from_violin(
         Path to the functional-specific calculation outputs directory
         (e.g. CALC_PATH / "pbesol").
     """
-    from ase.io import read as ase_read
 
     @callback(
         Output(struct_id, "children", allow_duplicate=True),
@@ -768,7 +767,7 @@ def struct_pair_from_violin(
 
         print(point.keys())
         print(point["customdata"])
-        print(point['curveNumber'])
+        print(point["curveNumber"])
         model_name = MODELS[point["curveNumber"]]  # e.g. mace-mp-0b3
         mp_id = customdata[0]
         formula = customdata[1]
@@ -780,7 +779,11 @@ def struct_pair_from_violin(
         vacancy_stem = "normal_vacancy" if vac_type == "NV" else "split_vacancy"
 
         mlip_path = (
-            calc_functional_path / model_name / mat_stem / cation / f"{vacancy_stem}.xyz"
+            calc_functional_path
+            / model_name
+            / mat_stem
+            / cation
+            / f"{vacancy_stem}.xyz"
         )
         dft_path = (
             calc_functional_path / "ref" / mat_stem / cation / f"{vacancy_stem}.xyz"

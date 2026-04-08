@@ -7,7 +7,10 @@ from dash.html import Div
 
 from ml_peg.app import APP_ROOT
 from ml_peg.app.base_app import BaseApp
-from ml_peg.app.utils.build_callbacks import plot_from_table_column, struct_pair_from_violin
+from ml_peg.app.utils.build_callbacks import (
+    plot_from_table_column,
+    struct_pair_from_violin,
+)
 from ml_peg.app.utils.load import read_plot
 from ml_peg.calcs import CALCS_ROOT
 from ml_peg.models.get_models import get_model_names
@@ -61,7 +64,7 @@ class SplitVacancyApp(BaseApp):
         struct_pair_from_violin(
             violin_id=f"{BENCHMARK_NAME}-violin-figure",
             struct_id=f"{BENCHMARK_NAME}-struct-placeholder",
-            calc_functional_path= STRUCTS_PATH / "PBEsol",
+            calc_functional_path=STRUCTS_PATH / "PBEsol",
         )
 
         # struct_pair_from_violin(
@@ -69,6 +72,7 @@ class SplitVacancyApp(BaseApp):
         #     struct_id=f"{BENCHMARK_NAME}-struct-placeholder",
         #     calc_functional_path=DATA_PATH / "PBE",
         # )
+
 
 def get_app() -> SplitVacancyApp:
     """
